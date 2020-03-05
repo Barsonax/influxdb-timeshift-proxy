@@ -1,0 +1,14 @@
+version: '3'
+
+services:
+  influxdbtimeshiftproxy:
+    image: ${REPOSITORY}/influxdbtimeshiftproxy
+    environment:
+      - INFLUXDB=influxdb:8086
+    build: 
+      context: .
+    ports:
+      - "9229:9229"
+      - "8089:8089"
+    volumes:
+       - ./src:/app
