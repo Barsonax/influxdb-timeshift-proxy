@@ -10,7 +10,8 @@ const units = [
     'year', 'month', 'week', 'day', 'hour', 'minute', 'second', 'millisecond', 'quarter',
     'y', 'M', 'w', 'd', 'h', 'm', 's', 'ms', 'Q',
 ];
-const shift_re = new RegExp(`[Aa][Ss]\\s+"shift_([0-9]+)_(${units.join('|')})"`);
+const shift_re = new RegExp(`[Aa][Ss]\\s+"shift_(.+)_(${units.join('|')})"`);
+const diff_re = new RegExp('diff\\(((.+),(.+)\\))')
 const from = /(time\s*>=?\s*)([0-9]+)(ms)/;
 const to = /(time\s*<=?\s*)([0-9]+)(ms)/;
 const from_rel = /(time\s*>=?\s*)(now\(\)\s*-\s*)([0-9]+)([usmhdw])/;
@@ -76,7 +77,7 @@ function calculate_values(results, math) {
                 }
                 ret.push([rec[0], result]);
             });
-        } catch (err) {}
+        } catch (err) { }
         return ret;
     }
     deb_math("No vars found:", math.expr);
@@ -117,6 +118,12 @@ function forward(path, req, res) {
             }
             match = q.match(shift_re);
             if (match) {
+                const diffMatch = match[1].match(diff_re)
+                if (diffMatch) {
+                    const diffp1 = new Date(diffMatch[2]).valueOf()
+                    const diffp2 = new Date(diffMatch[3]).valueOf()
+                    match[1] = Math.abs(diffp1 - diffp2).toString()
+                }
                 if (!req.proxyShift) {
                     req.proxyShift = {};
                 }
@@ -166,11 +173,13 @@ function intercept(rsp, data, req, res) {
                 if (req.proxyShift[idx] && result.series) {
                     return Object.assign({}, result, {
                         series: result.series.map(serie => {
-                            return Object.assign({}, serie, { values: serie.values.map(item => {
-                                const time = moment(item[0]);
-                                time.add(req.proxyShift[idx].count, req.proxyShift[idx].unit);
-                                return [ time.valueOf(), item[1]];
-                            })});
+                            return Object.assign({}, serie, {
+                                values: serie.values.map(item => {
+                                    const time = moment(item[0]);
+                                    time.add(req.proxyShift[idx].count, req.proxyShift[idx].unit);
+                                    return [time.valueOf(), item[1]];
+                                })
+                            });
                         })
                     });
                 }
