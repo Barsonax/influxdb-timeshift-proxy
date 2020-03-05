@@ -3,6 +3,7 @@
   "version": "0.0.8",
   "private": false,
   "scripts": {
+    "dev": "nodemon --inspect=0.0.0.0 ./bin/www",
     "start": "node ./bin/www"
   },
   "dependencies": {
