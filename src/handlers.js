@@ -1,6 +1,5 @@
 const deb_rewrite = require('debug')('rewrite');
 const deb_query = require('debug')('query');
-const deb_math = require('debug')('math');
 
 const moment = require('moment');
 const { resolve } = require('url');
@@ -16,12 +15,6 @@ const from = /(time\s*>=?\s*)([0-9]+)(ms)/;
 const to = /(time\s*<=?\s*)([0-9]+)(ms)/;
 const from_rel = /(time\s*>=?\s*)(now\(\)\s*-\s*)([0-9]+)([usmhdw])/;
 const to_rel = /(time\s*<=?\s*)(now\(\)\s*-\s*)([0-9]+)([usmhdw])/;
-const singlestat = /singlestat/;
-
-const math_re = /^MATH /;
-const math_name = /name="([0-9a-zA-Z]+)"/;
-const math_expr = /expr="([+*/%$0-9.() -]+)"/;
-const math_keep = /keep="([$0-9, ]+)"/;
 
 function fix_query_time(q, reg, count, unit) {
     const match = q.match(reg);
@@ -41,52 +34,8 @@ function fix_query_time_relative(q, reg, count, unit) {
     return q;
 }
 
-function get_result(results, statement, time) {
-    try {
-        const found = results[statement].series[0].values.find(function (item) {
-            return item[0] === time;
-        });
-        if (found) {
-            return found[1];
-        }
-    } catch (err) { }
-    return null;
-}
-
-function calculate_values(results, math) {
-    if (math.vars && math.vars.length) {
-        const indexes = math.vars.map(function (item) {
-            return parseInt(item.substr(1), 10);
-        });
-        const func = new Function(...math.vars, "return " + math.expr);
-        const ret = [];
-        try {
-            const base = results[indexes[0]].series[0].values;
-            base.forEach(function (rec) {
-                const digits = [];
-                indexes.forEach(function (idx) {
-                    digits.push(get_result(results, idx, rec[0]));
-                });
-                let result = func.apply(this, digits);
-                deb_math(rec[0], digits, result);
-                if (result === Infinity) {
-                    result = null;
-                }
-                if (isNaN(result)) {
-                    result = null;
-                }
-                ret.push([rec[0], result]);
-            });
-        } catch (err) { }
-        return ret;
-    }
-    deb_math("No vars found:", math.expr);
-    return [];
-}
-
 const reLeadingSlash = /^\//;
 const reLeadingSemicolon = /^;+/;
-const reEveryVar = /\$[0-9]+/g;
 const reTwoSemicolon = /;;/;
 
 function forward(path, req, res) {
@@ -95,27 +44,6 @@ function forward(path, req, res) {
         const parts = query.split(';').map((q, idx) => {
             let match;
             deb_query(idx, q);
-            match = q.match(math_re);
-            if (match) {
-                const name_parts = math_name.exec(q);
-                const expr_parts = math_expr.exec(q);
-                const keep_parts = math_keep.exec(q);
-                if (name_parts && expr_parts) {
-                    if (!req.proxyMath) {
-                        req.proxyMath = {};
-                    }
-                    req.proxyMath[idx] = {
-                        name: name_parts[1],
-                        expr: expr_parts[1],
-                        vars: expr_parts[1].match(reEveryVar),
-                        singlestat: q.match(singlestat),
-                        keep: keep_parts ? keep_parts[1].split(',').map(idx => {
-                            return parseInt(idx.trim().substring(1), 10);
-                        }) : []
-                    };
-                    return '';
-                }
-            }
             match = q.match(shift_re);
             if (match) {
                 const diffMatch = match[1].match(diff_re)
@@ -158,17 +86,9 @@ function forward(path, req, res) {
 }
 
 function intercept(rsp, data, req, res) {
-    if (req.proxyShift || req.proxyMath) {
+    if (req.proxyShift && Object.keys(req.proxyShift).length) {
         const json = JSON.parse(data.toString());
-        if (req.proxyMath && json.results) {
-            Object.keys(req.proxyMath).forEach(key => {
-                json.results.splice(parseInt(key, 10), 0, {
-                    statement_id: null,
-                    series: []
-                });
-            });
-        }
-        if (req.proxyShift && Object.keys(req.proxyShift).length && json.results) {
+        if (json.results) {
             const results = json.results.map((result, idx) => {
                 if (req.proxyShift[idx] && result.series) {
                     return Object.assign({}, result, {
@@ -186,40 +106,8 @@ function intercept(rsp, data, req, res) {
                 return result;
             });
             json.results = results;
+            return JSON.stringify(json);
         }
-        if (req.proxyMath && json.results) {
-            Object.keys(req.proxyMath).forEach(key => {
-                const math = req.proxyMath[key];
-                if (json.results[key]) {
-                    deb_math("Do math:", math.expr, "for statement:", key);
-                    json.results[key] = {
-                        statement_id: null,
-                        series: [{
-                            name: math.name,
-                            columns: ["time", "value"],
-                            values: calculate_values(json.results, math)
-                        }]
-                    };
-                    if (math.vars) {
-                        math.vars.forEach(item => {
-                            const idx = parseInt(item.substr(1), 10);
-                            if (math.keep.indexOf(idx) === -1) {
-                                if (math.singlestat) {
-                                    json.results[idx] = {};
-                                } else {
-                                    json.results[idx].series[0].values = [];
-                                }
-                                deb_math("Clear values for statement:", idx);
-                            }
-                        });
-                    }
-                }
-            });
-            json.results.forEach((result, idx) => {
-                result.statement_id = idx;
-            });
-        }
-        return JSON.stringify(json);
     }
     return data;
 }
