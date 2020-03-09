@@ -2,11 +2,11 @@ version: '3'
 
 services:
   influxdbtimeshiftproxy:
-    image: ${REPOSITORY}/influxdbtimeshiftproxy
+    image: ${REPOSITORY}influxdbtimeshiftproxy:{TAG}
     environment:
       - INFLUXDB=influxdb:8086
     build: 
-      context: .
+      context: ./src
     ports:
       - "9229:9229"
       - "8089:8089"
